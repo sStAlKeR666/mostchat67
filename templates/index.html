@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mostchat — Серверы, Группы и Звонки</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    :root {
+      --bg-rail: #09090b;
+      --bg-sidebar: #111214;
+      --bg-chat: #18191c;
+      --bg-panel: #1e2024;
+      --bg-input: #26282e;
+      --accent: #e11d48;
+      --accent-hover: #be123c;
+      --text: #f4f4f5;
+      --muted: #9ca3af;
+      --border: #27272a;
+      --green: #10b981;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: Inter, system-ui, -apple-system, sans-serif; }
+    body { background: var(--bg-rail); color: var(--text); height: 100vh; overflow: hidden; }
+
+    /* Авторизация */
+    #auth-screen {
+      display: flex; align-items: center; justify-content: center;
+      height: 100vh; background: radial-gradient(circle at top, #2a1016, #09090b 70%);
+    }
+    .auth-box {
+      width: 380px; background: var(--bg-panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 28px; box-shadow: 0 20px 50px rgba(0,0,0,.6);
+    }
+    .auth-box h1 { font-size: 24px; margin-bottom: 6px; color: #fff; }
+    .auth-box p { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .tab-btn {
+      flex: 1; padding: 8px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--bg-input); color: var(--muted); cursor: pointer; font-weight: 600;
+    }
+    .tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    input, select {
+      width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--bg-input); color: var(--text); margin-bottom: 12px; outline: none;
+    }
+    input:focus { border-color: var(--accent); }
+    .btn {
+      padding: 9px 14px; border-radius: 8px; border: none; background: var(--accent);
+      color: #fff; font-weight: 600; cursor: pointer; transition: .15s;
+    }
+    .btn:hover { background: var(--accent-hover); }
+    .btn-sec { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); }
+    .btn-sec:hover { background: #30333b; }
+    .btn-green { background: var(--green); color: #fff; }
+    .err { color: #fb7185; font-size: 13px; margin-bottom: 10px; min-height: 18px; }
+
+    /* Основной layout в стиле Discord */
+    #app-screen { display: none; height: 100vh; width: 100vw; }
+    .layout { display: flex; height: 100%; width: 100%; }
+
+    /* Крайняя левая полоса серверов и ЛС/Групп */
+    .server-rail {
+      width: 72px; background: var(--bg-rail); padding: 12px 0;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+      border-right: 1px solid var(--border); overflow-y: auto;
+    }
+    .rail-icon {
+      width: 48px; height: 48px; border-radius: 50%; background: var(--bg-panel);
+      display: flex; align-items: center; justify-content: center; cursor: pointer;
+      font-weight: 700; font-size: 15px; color: var(--text); border: none;
+      transition: .18s; position: relative; flex-shrink: 0;
+    }
+    .rail-icon:hover, .rail-icon.active { border-radius: 16px; background: var(--accent); color: #fff; }
+    .rail-sep { width: 32px; height: 2px; background: var(--border); border-radius: 2px; flex-shrink: 0; }
+
+    /* Вторая колонка: Друзья / Группы или Каналы сервера */
+    .sidebar {
+      width: 250px; background: var(--bg-sidebar); display: flex; flex-direction: column;
+      border-right: 1px solid var(--border);
+    }
+    .sidebar-header {
+      height: 52px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--border); font-weight: 700; font-size: 15px;
+    }
+    .sidebar-body { flex: 1; overflow-y: auto; padding: 10px; }
+    .sec-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--muted); font-weight: 700; margin: 12px 6px 6px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .list-item {
+      padding: 8px 10px; border-radius: 8px; cursor: pointer; display: flex;
+      align-items: center; gap: 10px; color: var(--muted); font-size: 14px; margin-bottom: 2px;
+    }
+    .list-item:hover { background: var(--bg-panel); color: var(--text); }
+    .list-item.active { background: #272930; color: #fff; font-weight: 600; }
+    .avatar-dot {
+      width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center;
+      justify-content: center; font-weight: 700; font-size: 12px; color: #fff; flex-shrink: 0;
+    }
+
+    /* Активный голосовой статус внизу сайдбара */
+    .voice-connected-bar {
+      background: #14261e; border-top: 1px solid #1f3d2f; padding: 8px 12px;
+      display: none; align-items: center; justify-content: space-between; font-size: 12px;
+    }
+    .voice-connected-bar.active { display: flex; }
+
+    /* Нижняя карточка профиля */
+    .user-bar {
+      height: 58px; background: #0d0e11; border-top: 1px solid var(--border);
+      padding: 0 10px; display: flex; align-items: center; justify-content: space-between;
+    }
+
+    /* Центральная область чата */
+    .chat-area {
+      flex: 1; background: var(--bg-chat); display: flex; flex-direction: column; min-width: 0;
+    }
+    .chat-header {
+      height: 52px; padding: 0 18px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .chat-header-title { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+    .chat-header-actions { display: flex; gap: 8px; }
+
+    /* Баннер звонка в группе или личке */
+    .call-stage {
+      display: none; background: #0e1015; border-bottom: 1px solid var(--border);
+      padding: 12px 18px; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+    }
+    .call-stage.active { display: flex; }
+    .call-videos { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .peer-card {
+      background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 12px; font-size: 12px; display: flex; align-items: center; gap: 8px;
+    }
+    video { width: 160px; height: 100px; background: #000; border-radius: 6px; object-fit: cover; }
+
+    .messages { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+    .msg { display: flex; gap: 12px; align-items: flex-start; }
+    .msg-meta { font-size: 13px; margin-bottom: 3px; }
+    .msg-time { color: var(--muted); font-size: 11px; margin-left: 6px; }
+    .msg-text { font-size: 14px; line-height: 1.45; word-break: break-word; }
+    .msg-media { max-width: 320px; max-height: 240px; border-radius: 8px; margin-top: 6px; display: block; }
+    .call-log-badge {
+      background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35);
+      color: #6ee7b7; padding: 6px 12px; border-radius: 8px; font-size: 12px;
+    }
+
+    .chat-input-wrap { padding: 12px 20px 18px; display: flex; gap: 10px; align-items: center; }
+    .chat-input-wrap input { margin-bottom: 0; flex: 1; }
+
+    /* Правая колонка участников сервера/группы */
+    .members-panel {
+      width: 220px; background: var(--bg-sidebar); border-left: 1px solid var(--border);
+      padding: 12px; overflow-y: auto;
+    }
+
+    /* Модальные окна */
+    .modal-backdrop {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7);
+      align-items: center; justify-content: center; z-index: 50;
+    }
+    .modal-backdrop.active { display: flex; }
+    .modal {
+      width: 380px; background: var(--bg-panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 22px;
+    }
+    .modal h3 { margin-bottom: 12px; font-size: 18px; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+    .friend-check-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 8px; border-radius: 6px; background: var(--bg-input); margin-bottom: 6px; font-size: 13px;
+    }
+    .friend-check-row input { width: auto; margin-bottom: 0; }
+
+    /* Тосты уведомлений */
+    .toast-wrap { position: fixed; top: 16px; right: 16px; z-index: 100; display: flex; flex-direction: column; gap: 8px; }
+    .toast {
+      background: var(--bg-panel); border-left: 4px solid var(--accent); padding: 10px 14px;
+      border-radius: 8px; font-size: 13px; box-shadow: 0 10px 25px rgba(0,0,0,.5);
+    }
+  </style>
+</head>
+<body>
+  <div class="toast-wrap" id="toast-wrap"></div>
+
+  <!-- ЭКРАН ВХОДА / РЕГИСТРАЦИИ -->
+  <div id="auth-screen">
+    <div class="auth-box">
+      <h1>Mostchat</h1>
+      <p>Личные чаты, группы со звонками и сервера в стиле Discord</p>
+      <div class="tabs">
+        <button class="tab-btn active" id="tab-login" onclick="switchAuthTab('login')">Вход</button>
+        <button class="tab-btn" id="tab-register" onclick="switchAuthTab('register')">Регистрация</button>
+      </div>
+      <div class="err" id="auth-error"></div>
+      <input type="text" id="auth-username" placeholder="Никнейм" />
+      <input type="password" id="auth-password" placeholder="Пароль" />
+      <button class="btn" style="width:100%" id="auth-submit" onclick="submitAuth()">Войти</button>
+    </div>
+  </div>
+
+  <!-- ОСНОВНОЕ ПРИЛОЖЕНИЕ -->
+  <div id="app-screen">
+    <div class="layout">
+      <!-- Левая панель серверов -->
+      <div class="server-rail" id="server-rail">
+        <button class="rail-icon active" id="home-btn" title="Личные сообщения и Группы" onclick="selectHome()">MC</button>
+        <div class="rail-sep"></div>
+        <div id="rail-servers" style="display:flex;flex-direction:column;gap:10px;align-items:center;"></div>
+        <button class="rail-icon" title="Создать сервер" onclick="openModal('create-server-modal')">+</button>
+        <button class="rail-icon" title="Вступить по коду SRV-XXXX" onclick="openModal('join-server-modal')">⇢</button>
+      </div>
+
+      <!-- Вторая колонка -->
+      <div class="sidebar">
+        <div class="sidebar-header" id="sidebar-header">
+          <span>Главная</span>
+        </div>
+        <div class="sidebar-body" id="sidebar-body"></div>
+
+        <div class="voice-connected-bar" id="voice-connected-bar">
+          <div>
+            <div style="color:var(--green);font-weight:700;">Голос подключён</div>
+            <div id="voice-channel-label" style="color:var(--muted);"></div>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button class="btn-sec" style="padding:5px 8px;border-radius:6px;cursor:pointer;" id="voice-mute-btn" onclick="toggleVoiceMute()">🎙</button>
+            <button class="btn" style="padding:5px 8px;border-radius:6px;" onclick="leaveVoiceChannel()">✕</button>
+          </div>
+        </div>
+
+        <div class="user-bar">
+          <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+            <div class="avatar-dot" id="my-avatar-dot"></div>
+            <div style="min-width:0;">
+              <div id="my-username-label" style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+              <div id="my-uid-label" style="font-size:11px;color:var(--muted);"></div>
+            </div>
+          </div>
+          <button class="btn-sec" style="padding:6px 8px;border-radius:6px;cursor:pointer;" onclick="openProfileModal()">⚙</button>
+        </div>
+      </div>
+
+      <!-- Центральная область чата -->
+      <div class="chat-area">
+        <div class="chat-header">
+          <div class="chat-header-title" id="chat-title">Выберите друга, группу или канал</div>
+          <div class="chat-header-actions" id="chat-actions"></div>
+        </div>
+
+        <!-- Сцена звонка -->
+        <div class="call-stage" id="call-stage">
+          <div>
+            <div id="call-status-text" style="font-weight:700;font-size:14px;color:var(--green);">Идёт звонок</div>
+            <div class="call-videos" id="call-videos" style="margin-top:8px;">
+              <video id="local-video" autoplay muted playsinline></video>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn-sec" onclick="toggleCallMic()">Микрофон</button>
+            <button class="btn-sec" onclick="toggleCallCam()">Камера</button>
+            <button class="btn" onclick="hangupCurrentCall()">Завершить</button>
+          </div>
+        </div>
+
+        <div class="messages" id="messages"></div>
+
+        <div class="chat-input-wrap">
+          <input type="file" id="media-input" accept="image/*,video/*,audio/*" style="display:none" onchange="handleMediaSelected(event)" />
+          <button class="btn-sec" onclick="document.getElementById('media-input').click()">📎</button>
+          <input type="text" id="message-input" placeholder="Напишите сообщение..." onkeydown="if(event.key==='Enter') sendMessage()" />
+          <button class="btn" onclick="sendMessage()">Отправить</button>
+        </div>
+      </div>
+
+      <!-- Панель участников -->
+      <div class="members-panel" id="members-panel">
+        <div class="sec-title">Участники</div>
+        <div id="members-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛКА: ДОБАВИТЬ ДРУГА -->
+  <div class="modal-backdrop" id="add-friend-modal">
+    <div class="modal">
+      <h3>Добавить друга по UID</h3>
+      <input type="text" id="friend-uid-input" placeholder="Например: MC-1234" />
+      <div class="modal-actions">
+        <button class="btn-sec" onclick="closeModal('add-friend-modal')">Отмена</button>
+        <button class="btn" onclick="addFriend()">Добавить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛКА: СОЗДАТЬ ГРУППУ -->
+  <div class="modal-backdrop" id="create-group-modal">
+    <div class="modal">
+      <h3>Создать группу</h3>
+      <input type="text" id="group-name-input" placeholder="Название группы" />
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Выберите друзей для добавления:</div>
+      <div id="group-friends-checklist" style="max-height:180px;overflow-y:auto;"></div>
+      <div class="modal-actions">
+        <button class="btn-sec" onclick="closeModal('create-group-modal')">Отмена</button>
+        <button class="btn" onclick="createGroup()">Создать</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛКА: ДОБАВИТЬ УЧАСТНИКА В ГРУППУ -->
+  <div class="modal-backdrop" id="add-group-member-modal">
+    <div class="modal">
+      <h3>Добавить друга в группу</h3>
+      <input type="text" id="group-add-uid-input" placeholder="UID друга (MC-XXXX)" />
+      <div class="modal-actions">
+        <button class="btn-sec" onclick="closeModal('add-group-member-modal')">Отмена</button>
+        <button class="btn" onclick="submitAddGroupMember()">Добавить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛКА: СОЗДАТЬ СЕРВЕР -->
+  <div class="modal-backdrop" id="create-server-modal">
+    <div class="modal">
+      <h3>Создать сервер</h3>
+      <input type="text" id="server-name-input" placeholder="Название сервера" />
+      <input type="color" id="server-color-input" value="#e11d48" style="height:40px;padding:4px;" />
+      <div class="modal-actions">
+        <button class="btn-sec" onclick="closeModal('create-server-modal')">Отмена</button>
+        <button class="btn" onclick="createServer()">Создать</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛКА: ВСТУПИТЬ НА СЕРВЕР -->
+  <div class="modal-backdrop" id="join-server-modal">
+    <div class="modal">
+      <h3>Вступить на сервер</h3>
+      <input type="text" id="server-code-input" placeholder="Код сервера (SRV-XXXX)" />
+      <div class="modal-actions">
+        <button class="btn-sec" onclick="closeModal('join-server-modal')">Отмена</button>
+        <button class="btn" onclick="joinServer()">Вступить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛКА: СОЗДАТЬ КАНАЛ -->
+  <div class="modal-backdrop" id="create-channel-modal">
+    <div class="modal">
+      <h3>Новый канал</h3>
+      <input type="text" id="channel-name-input" placeholder="Название канала" />
+      <select id="channel-type-input">
+        <option value="text">Текстовый канал (#)</option>
+        <option value="voice">Голосовой канал (🔊)</option>
+      </select>
+      <div class="modal-actions">
+        <button class="btn-sec" onclick="closeModal('create-channel-modal')">Отмена</button>
+        <button class="btn" onclick="createChannel()">Создать</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛКА: ПРОФИЛЬ -->
+  <div class="modal-backdrop" id="profile-modal">
+    <div class="modal">
+      <h3>Настройки профиля</h3>
+      <input type="text" id="profile-username-input" placeholder="Никнейм" />
+      <input type="text" id="profile-bio-input" placeholder="О себе" />
+      <input type="color" id="profile-color-input" value="#e11d48" style="height:40px;padding:4px;" />
+      <div class="modal-actions">
+        <button class="btn-sec" onclick="closeModal('profile-modal')">Закрыть</button>
+        <button class="btn" onclick="saveProfile()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    let authMode = 'login';
+    let me = null;
+    let friends = [];
+    let groups = [];
+    let servers = [];
+    let voiceState = {};
+
+    // Текущий контекст: 'home' или код сервера 'SRV-XXXX'
+    let modeView = 'home';
+    let activeServerCode = null;
+    let activeRoom = null;
+    let activeGroupGid = null;
+    let activeDmUid = null;
+    let pendingMedia = { data: '', type: '' };
+
+    // Звонки и WebRTC
+    const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    let localStream = null;
+    let dmPeer = null;
+    let incomingCallData = null;
+    let activeDmCallUid = null;
+    let activeGroupCallGid = null;
+    let activeVoiceChannelCid = null;
+    let groupPeers = {}; // peer_uid -> RTCPeerConnection
+    let voicePeers = {}; // peer_uid -> RTCPeerConnection
+
+    function notify(text) {
+      const wrap = document.getElementById('toast-wrap');
+      const el = document.createElement('div');
+      el.className = 'toast';
+      el.textContent = text;
+      wrap.appendChild(el);
+      setTimeout(() => el.remove(), 3500);
+    }
+
+    function openModal(id) { document.getElementById(id).classList.add('active'); }
+    function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+
+    function switchAuthTab(mode) {
+      authMode = mode;
+      document.getElementById('tab-login').classList.toggle('active', mode === 'login');
+      document.getElementById('tab-register').classList.toggle('active', mode === 'register');
+      document.getElementById('auth-submit').textContent = mode === 'login' ? 'Войти' : 'Зарегистрироваться';
+      document.getElementById('auth-error').textContent = '';
+    }
+
+    function submitAuth() {
+      const username = document.getElementById('auth-username').value.trim();
+      const password = document.getElementById('auth-password').value.trim();
+      socket.emit(authMode, { username, password });
+    }
+
+    socket.on('auth_error', (msg) => {
+      document.getElementById('auth-error').textContent = msg;
+    });
+
+    socket.on('auth_success', (data) => {
+      me = data;
+      friends = data.friends || [];
+      groups = data.groups || [];
+      servers = data.servers || [];
+      sessionStorage.setItem('mc_user', JSON.stringify(me));
+      document.getElementById('auth-screen').style.display = 'none';
+      document.getElementById('app-screen').style.display = 'block';
+      renderUserBar();
+      renderServerRail();
+      selectHome();
+    });
+
+    const savedUser = sessionStorage.getItem('mc_user');
+    if (savedUser) {
+      try {
+        const parsed = JSON.parse(savedUser);
+        if (parsed && parsed.uid) {
+          socket.emit('register_uid', { uid: parsed.uid });
+          socket.emit('login', { username: parsed.username, password: parsed.password || '' });
+        }
+      } catch (e) {}
+    }
+
+    socket.on('notification', (n) => notify(n.text));
+    socket.on('friends_updated', (list) => { friends = list; if (modeView === 'home') renderHomeSidebar(); });
+    socket.on('groups_updated', (list) => {
+      groups = list;
+      for (const g of groups) socket.emit('join_room', { room: `grp_${g.gid}` });
+      if (modeView === 'home') renderHomeSidebar();
+      if (activeGroupGid) {
+        const cur = groups.find(x => x.gid === activeGroupGid);
+        if (cur) renderMembers(cur.members);
+      }
+    });
+    socket.on('servers_updated', (list) => {
+      servers = list;
+      renderServerRail();
+      if (modeView === 'server' && activeServerCode) renderServerSidebar(activeServerCode);
+    });
+    socket.on('profile_updated', (u) => {
+      if (me && me.uid === u.uid) {
+        me = { ...me, ...u };
+        sessionStorage.setItem('mc_user', JSON.stringify(me));
+        renderUserBar();
+      }
+    });
+
+    function renderUserBar() {
+      document.getElementById('my-username-label').textContent = me.username;
+      document.getElementById('my-uid-label').textContent = me.uid;
+      const dot = document.getElementById('my-avatar-dot');
+      dot.style.background = me.color || '#e11d48';
+      dot.textContent = me.username[0].toUpperCase();
+    }
+
+    function openProfileModal() {
+      document.getElementById('profile-username-input').value = me.username;
+      document.getElementById('profile-bio-input').value = me.bio || '';
+      document.getElementById('profile-color-input').value = me.color || '#e11d48';
+      openModal('profile-modal');
+    }
+
+    function saveProfile() {
+      socket.emit('update_profile', {
+        uid: me.uid,
+        username: document.getElementById('profile-username-input').value,
+        bio: document.getElementById('profile-bio-input').value,
+        color: document.getElementById('profile-color-input').value,
+        banner: me.banner || '#1f1215',
+        avatar: me.avatar || ''
+      });
+      closeModal('profile-modal');
+    }
+
+    function renderServerRail() {
+      const container = document.getElementById('rail-servers');
+      container.innerHTML = '';
+      document.getElementById('home-btn').classList.toggle('active', modeView === 'home');
+      for (const s of servers) {
+        const btn = document.createElement('button');
+        btn.className = 'rail-icon' + (modeView === 'server' && activeServerCode === s.code ? ' active' : '');
+        btn.style.background = modeView === 'server' && activeServerCode === s.code ? s.color : '#1e2024';
+        btn.title = `${s.name} (${s.code})`;
+        btn.textContent = s.name.slice(0, 2).toUpperCase();
+        btn.onclick = () => selectServer(s.code);
+        container.appendChild(btn);
+      }
+    }
+
+    function selectHome() {
+      modeView = 'home';
+      activeServerCode = null;
+      renderServerRail();
+      document.getElementById('sidebar-header').innerHTML = `
+        <span>Главная</span>
+        <button class="btn" style="padding:4px 8px;font-size:12px;" onclick="openModal('add-friend-modal')">+ Друг</button>
+      `;
+      renderHomeSidebar();
+    }
+
+    function renderHomeSidebar() {
+      const body = document.getElementById('sidebar-body');
+      body.innerHTML = '';
+
+      const grpTitle = document.createElement('div');
+      grpTitle.className = 'sec-title';
+      grpTitle.innerHTML = `<span>Группы</span><button class="btn-sec" style="padding:2px 6px;cursor:pointer;border-radius:4px;" onclick="openCreateGroupModal()">+ Группа</button>`;
+      body.appendChild(grpTitle);
+
+      for (const g of groups) {
+        const item = document.createElement('div');
+        item.className = 'list-item' + (activeRoom === `grp_${g.gid}` ? ' active' : '');
+        item.innerHTML = `<div class="avatar-dot" style="background:${g.color}">${g.name[0].toUpperCase()}</div><div style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${g.name}</div>`;
+        item.onclick = () => openGroupChat(g);
+        body.appendChild(item);
+      }
+
+      const frTitle = document.createElement('div');
+      frTitle.className = 'sec-title';
+      frTitle.innerHTML = `<span>Друзья (${friends.length})</span>`;
+      body.appendChild(frTitle);
+
+      for (const f of friends) {
+        const room = [me.uid, f.uid].sort().join('_');
+        const dmRoom = `dm_${room}`;
+        const item = document.createElement('div');
+        item.className = 'list-item' + (activeRoom === dmRoom ? ' active' : '');
+        item.innerHTML = `<div class="avatar-dot" style="background:${f.color}">${f.username[0].toUpperCase()}</div><div><div style="color:var(--text);">${f.username}</div><div style="font-size:11px;">${f.uid}</div></div>`;
+        item.onclick = () => openDmChat(f, dmRoom);
+        body.appendChild(item);
+      }
+    }
+
+    function openDmChat(friend, room) {
+      activeRoom = room;
+      activeGroupGid = null;
+      activeDmUid = friend.uid;
+      renderHomeSidebar();
+      document.getElementById('chat-title').textContent = `${friend.username} (${friend.uid})`;
+      document.getElementById('chat-actions').innerHTML = `
+        <button class="btn-green btn" onclick="startDmCall(false)">📞 Голос</button>
+        <button class="btn-sec" onclick="startDmCall(true)">🎥 Видео</button>
+      `;
+      renderMembers([friend, me]);
+      joinChatRoom(room);
+    }
+
+    function openGroupChat(g) {
+      const room = `grp_${g.gid}`;
+      activeRoom = room;
+      activeGroupGid = g.gid;
+      activeDmUid = null;
+      renderHomeSidebar();
+      document.getElementById('chat-title').textContent = `${g.name} · ${g.gid}`;
+      document.getElementById('chat-actions').innerHTML = `
+        <button class="btn-sec" onclick="openAddGroupMemberModal('${g.gid}')">+ Добавить друга</button>
+        <button class="btn-green btn" onclick="joinGroupCall('${g.gid}')">📞 Позвонить в группу</button>
+      `;
+      renderMembers(g.members || []);
+      joinChatRoom(room);
+    }
+
+    function selectServer(code) {
+      modeView = 'server';
+      activeServerCode = code;
+      renderServerRail();
+      renderServerSidebar(code);
+      const srv = servers.find(s => s.code === code);
+      if (srv) {
+        renderMembers(srv.members || []);
+        const firstText = (srv.channels || []).find(c => c.type === 'text');
+        if (firstText) openChannelChat(srv, firstText);
+      }
+    }
+
+    function renderServerSidebar(code) {
+      const srv = servers.find(s => s.code === code);
+      if (!srv) return;
+      document.getElementById('sidebar-header').innerHTML = `
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${srv.name}</span>
+        <span style="font-size:11px;color:var(--muted);cursor:pointer;" title="Скопировать код" onclick="navigator.clipboard?.writeText('${srv.code}');notify('Код ${srv.code} скопирован')">${srv.code}</span>
+      `;
+      const body = document.getElementById('sidebar-body');
+      body.innerHTML = '';
+
+      const chTitle = document.createElement('div');
+      chTitle.className = 'sec-title';
+      chTitle.innerHTML = `<span>Каналы</span>${srv.owner === me.uid ? `<button class="btn-sec" style="padding:2px 6px;cursor:pointer;border-radius:4px;" onclick="openModal('create-channel-modal')">+</button>` : ''}`;
+      body.appendChild(chTitle);
+
+      for (const ch of (srv.channels || [])) {
+        if (ch.type === 'text') {
+          const room = `chn_${ch.cid}`;
+          const item = document.createElement('div');
+          item.className = 'list-item' + (activeRoom === room ? ' active' : '');
+          item.textContent = `# ${ch.name}`;
+          item.onclick = () => openChannelChat(srv, ch);
+          body.appendChild(item);
+        } else {
+          const vWrap = document.createElement('div');
+          const item = document.createElement('div');
+          item.className = 'list-item' + (activeVoiceChannelCid === ch.cid ? ' active' : '');
+          item.textContent = `🔊 ${ch.name}`;
+          item.onclick = () => joinVoiceChannel(ch);
+          vWrap.appendChild(item);
+
+          const vUsers = voiceState[ch.cid] || [];
+          for (const vu of vUsers) {
+            const sub = document.createElement('div');
+            sub.style.cssText = 'padding:4px 10px 4px 28px;font-size:12px;color:#d1fae5;display:flex;align-items:center;gap:6px;';
+            sub.textContent = `• ${vu.username} ${vu.muted ? '(🔇)' : ''}`;
+            vWrap.appendChild(sub);
+          }
+          body.appendChild(vWrap);
+        }
+      }
+    }
+
+    function openChannelChat(srv, ch) {
+      const room = `chn_${ch.cid}`;
+      activeRoom = room;
+      activeGroupGid = null;
+      activeDmUid = null;
+      renderServerSidebar(srv.code);
+      document.getElementById('chat-title').textContent = `# ${ch.name} — ${srv.name}`;
+      document.getElementById('chat-actions').innerHTML = `<span style="font-size:12px;color:var(--muted);">Код: ${srv.code}</span>`;
+      renderMembers(srv.members || []);
+      joinChatRoom(room);
+    }
+
+    function renderMembers(list) {
+      const panel = document.getElementById('members-list');
+      panel.innerHTML = '';
+      for (const u of list) {
+        const row = document.createElement('div');
+        row.className = 'list-item';
+        row.innerHTML = `<div class="avatar-dot" style="background:${u.color || '#e11d48'};width:24px;height:24px;font-size:11px;">${u.username[0].toUpperCase()}</div><span>${u.username}</span>`;
+        panel.appendChild(row);
+      }
+    }
+
+    function joinChatRoom(room) {
+      document.getElementById('messages').innerHTML = '';
+      socket.emit('join_room', { room });
+    }
+
+    socket.on('load_history', ({ room, messages }) => {
+      if (room !== activeRoom) return;
+      const box = document.getElementById('messages');
+      box.innerHTML = '';
+      for (const m of messages) appendMessage(m);
+      box.scrollTop = box.scrollHeight;
+    });
+
+    socket.on('receive_message', (m) => {
+      if (m.room === activeRoom) {
+        appendMessage(m);
+        const box = document.getElementById('messages');
+        box.scrollTop = box.scrollHeight;
+      } else if (m.room.startsWith('grp_')) {
+        notify(`Новое сообщение в группе от ${m.username}`);
+      }
+    });
+
+    function appendMessage(m) {
+      const box = document.getElementById('messages');
+      if (m.media_type === 'call_log') {
+        const el = document.createElement('div');
+        el.className = 'call-log-badge';
+        el.textContent = `${m.text} (${m.time || ''})`;
+        box.appendChild(el);
+        return;
+      }
+      const row = document.createElement('div');
+      row.className = 'msg';
+      let mediaHtml = '';
+      if (m.media) {
+        if (m.media_type && m.media_type.startsWith('image')) mediaHtml = `<img class="msg-media" src="${m.media}" />`;
+        else if (m.media_type && m.media_type.startsWith('video')) mediaHtml = `<video class="msg-media" src="${m.media}" controls></video>`;
+        else if (m.media_type && m.media_type.startsWith('audio')) mediaHtml = `<audio src="${m.media}" controls style="margin-top:6px;"></audio>`;
+      }
+      row.innerHTML = `
+        <div class="avatar-dot" style="background:${m.color || '#e11d48'}">${(m.username || '?')[0].toUpperCase()}</div>
+        <div>
+          <div class="msg-meta"><strong style="color:${m.color || '#fff'}">${m.username}</strong><span class="msg-time">${m.time || ''}</span></div>
+          <div class="msg-text">${m.text || ''}</div>
+          ${mediaHtml}
+        </div>
+      `;
+      box.appendChild(row);
+    }
+
+    function handleMediaSelected(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        pendingMedia = { data: reader.result, type: file.type };
+        notify(`Файл прикреплён: ${file.name}`);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function sendMessage() {
+      const input = document.getElementById('message-input');
+      const text = input.value.trim();
+      if (!activeRoom || (!text && !pendingMedia.data)) return;
+      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      socket.emit('send_message', {
+        room: activeRoom,
+        uid: me.uid,
+        username: me.username,
+        color: me.color || '#e11d48',
+        avatar: me.avatar || '',
+        text,
+        media: pendingMedia.data,
+        media_type: pendingMedia.type,
+        time: now
+      });
+      input.value = '';
+      pendingMedia = { data: '', type: '' };
+    }
+
+    // --- ДЕЙСТВИЯ МОДАЛОК ---
+    function addFriend() {
+      const target_uid = document.getElementById('friend-uid-input').value.trim();
+      if (!target_uid) return;
+      socket.emit('add_friend', { my_uid: me.uid, target_uid });
+      document.getElementById('friend-uid-input').value = '';
+      closeModal('add-friend-modal');
+    }
+
+    function openCreateGroupModal() {
+      const list = document.getElementById('group-friends-checklist');
+      list.innerHTML = '';
+      for (const f of friends) {
+        const row = document.createElement('label');
+        row.className = 'friend-check-row';
+        row.innerHTML = `<span>${f.username} (${f.uid})</span><input type="checkbox" value="${f.uid}" class="grp-friend-cb" />`;
+        list.appendChild(row);
+      }
+      openModal('create-group-modal');
+    }
+
+    function createGroup() {
+      const name = document.getElementById('group-name-input').value.trim();
+      const selected = Array.from(document.querySelectorAll('.grp-friend-cb:checked')).map(cb => cb.value);
+      socket.emit('create_group', { uid: me.uid, name, color: me.color || '#e11d48', members: selected });
+      document.getElementById('group-name-input').value = '';
+      closeModal('create-group-modal');
+    }
+
+    function openAddGroupMemberModal(gid) {
+      activeGroupGid = gid;
+      document.getElementById('group-add-uid-input').value = '';
+      openModal('add-group-member-modal');
+    }
+
+    function submitAddGroupMember() {
+      const target_uid = document.getElementById('group-add-uid-input').value.trim();
+      if (!activeGroupGid || !target_uid) return;
+      socket.emit('add_group_member', { uid: me.uid, gid: activeGroupGid, target_uid });
+      closeModal('add-group-member-modal');
+    }
+
+    function createServer() {
+      const name = document.getElementById('server-name-input').value.trim();
+      const color = document.getElementById('server-color-input').value;
+      socket.emit('create_server', { uid: me.uid, name, color });
+      document.getElementById('server-name-input').value = '';
+      closeModal('create-server-modal');
+    }
+
+    function joinServer() {
+      const code = document.getElementById('server-code-input').value.trim();
+      socket.emit('join_server', { uid: me.uid, code });
+      document.getElementById('server-code-input').value = '';
+      closeModal('join-server-modal');
+    }
+
+    function createChannel() {
+      const name = document.getElementById('channel-name-input').value.trim();
+      const type = document.getElementById('channel-type-input').value;
+      socket.emit('create_channel', { uid: me.uid, server_code: activeServerCode, name, type });
+      document.getElementById('channel-name-input').value = '';
+      closeModal('create-channel-modal');
+    }
+
+    // --- ГОЛОСОВЫЕ И ВИДЕОЗВОНКИ ---
+    async function ensureLocalStream(video = false) {
+      if (localStream) {
+        if (video && localStream.getVideoTracks().length === 0) {
+          const vStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          vStream.getVideoTracks().forEach(t => localStream.addTrack(t));
+        }
+        document.getElementById('local-video').srcObject = localStream;
+        return localStream;
+      }
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video });
+      document.getElementById('local-video').srcObject = localStream;
+      return localStream;
+    }
+
+    function showCallStage(label) {
+      document.getElementById('call-stage').classList.add('active');
+      document.getElementById('call-status-text').textContent = label;
+    }
+
+    function hideCallStage() {
+      document.getElementById('call-stage').classList.remove('active');
+      Array.from(document.querySelectorAll('.remote-call-card')).forEach(el => el.remove());
+    }
+
+    async function startDmCall(withVideo) {
+      if (!activeDmUid) return;
+      await ensureLocalStream(withVideo);
+      activeDmCallUid = activeDmUid;
+      showCallStage(`Звонок с ${activeDmUid}...`);
+      socket.emit('call_user', {
+        from_uid: me.uid,
+        from_name: me.username,
+        to_uid: activeDmUid,
+        room: activeRoom,
+        video: withVideo
+      });
+    }
+
+    socket.on('incoming_call', async (data) => {
+      const accept = confirm(`Входящий ${data.video ? 'видео' : 'голосовой'} звонок от ${data.from_name} (${data.from_uid}). Принять?`);
+      if (!accept) {
+        socket.emit('call_rejected', { to_uid: data.from_uid });
+        return;
+      }
+      await ensureLocalStream(Boolean(data.video));
+      activeDmCallUid = data.from_uid;
+      activeRoom = data.room;
+      showCallStage(`Звонок с ${data.from_name}`);
+      setupDmPeer(data.from_uid, true);
+      socket.emit('call_accepted', { to_uid: data.from_uid });
+    });
+
+    socket.on('call_accepted', async (data) => {
+      showCallStage(`На связи с ${data.to_uid || activeDmCallUid}`);
+      setupDmPeer(activeDmCallUid, false);
+      const offer = await dmPeer.createOffer();
+      await dmPeer.setLocalDescription(offer);
+      socket.emit('webrtc_signal', { to_uid: activeDmCallUid, signal: { type: 'offer', sdp: offer } });
+    });
+
+    function setupDmPeer(peerUid, isAnswerer) {
+      dmPeer = new RTCPeerConnection(rtcConfig);
+      localStream.getTracks().forEach(track => dmPeer.addTrack(track, localStream));
+      dmPeer.onicecandidate = (e) => {
+        if (e.candidate) socket.emit('webrtc_signal', { to_uid: peerUid, signal: { type: 'ice', candidate: e.candidate } });
+      };
+      dmPeer.ontrack = (e) => attachRemoteStream(peerUid, e.streams[0]);
+    }
+
+    socket.on('webrtc_signal', async ({ from_uid, signal }) => {
+      if (!dmPeer) setupDmPeer(from_uid, true);
+      if (signal.type === 'offer') {
+        await dmPeer.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+        const ans = await dmPeer.createAnswer();
+        await dmPeer.setLocalDescription(ans);
+        socket.emit('webrtc_signal', { to_uid: from_uid, signal: { type: 'answer', sdp: ans } });
+      } else if (signal.type === 'answer') {
+        await dmPeer.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+      } else if (signal.type === 'ice' && signal.candidate) {
+        await dmPeer.addIceCandidate(new RTCIceCandidate(signal.candidate));
+      }
+    });
+
+    function attachRemoteStream(peerId, stream) {
+      let card = document.getElementById(`remote-card-${peerId}`);
+      if (!card) {
+        card = document.createElement('div');
+        card.className = 'peer-card remote-call-card';
+        card.id = `remote-card-${peerId}`;
+        card.innerHTML = `<video autoplay playsinline></video><div>${peerId}</div>`;
+        document.getElementById('call-videos').appendChild(card);
+      }
+      card.querySelector('video').srcObject = stream;
+    }
+
+    function removeRemoteStream(peerId) {
+      const card = document.getElementById(`remote-card-${peerId}`);
+      if (card) card.remove();
+    }
+
+    // Групповые звонки
+    async function joinGroupCall(gid) {
+      await ensureLocalStream(false);
+      activeGroupCallGid = gid;
+      showCallStage(`Групповой звонок · ${gid}`);
+      socket.emit('join_group_call', {
+        gid,
+        uid: me.uid,
+        username: me.username,
+        color: me.color || '#e11d48',
+        avatar: me.avatar || ''
+      });
+    }
+
+    socket.on('group_call_peer_joined', async ({ gid, peer_uid }) => {
+      if (activeGroupCallGid !== gid) return;
+      const pc = createMeshPeer(peer_uid, (sig) => socket.emit('group_webrtc_signal', { gid, to_uid: peer_uid, signal: sig }));
+      groupPeers[peer_uid] = pc;
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit('group_webrtc_signal', { gid, to_uid: peer_uid, signal: { type: 'offer', sdp: offer } });
+    });
+
+    socket.on('group_webrtc_signal', async ({ gid, from_uid, signal }) => {
+      if (activeGroupCallGid !== gid) return;
+      let pc = groupPeers[from_uid];
+      if (!pc) {
+        pc = createMeshPeer(from_uid, (sig) => socket.emit('group_webrtc_signal', { gid, to_uid: from_uid, signal: sig }));
+        groupPeers[from_uid] = pc;
+      }
+      await handlePeerSignal(pc, signal, (ans) => socket.emit('group_webrtc_signal', { gid, to_uid: from_uid, signal: { type: 'answer', sdp: ans } }));
+    });
+
+    socket.on('group_call_peer_left', ({ peer_uid }) => {
+      if (groupPeers[peer_uid]) { groupPeers[peer_uid].close(); delete groupPeers[peer_uid]; }
+      removeRemoteStream(peer_uid);
+    });
+
+    // Голосовые каналы серверов
+    async function joinVoiceChannel(ch) {
+      await ensureLocalStream(false);
+      activeVoiceChannelCid = ch.cid;
+      document.getElementById('voice-connected-bar').classList.add('active');
+      document.getElementById('voice-channel-label').textContent = ch.name;
+      socket.emit('join_voice_channel', {
+        cid: ch.cid,
+        uid: me.uid,
+        username: me.username,
+        color: me.color || '#e11d48',
+        avatar: me.avatar || '',
+        muted: false,
+        video: false
+      });
+    }
+
+    function leaveVoiceChannel() {
+      if (activeVoiceChannelCid) {
+        socket.emit('leave_voice_channel', { cid: activeVoiceChannelCid, uid: me.uid });
+        activeVoiceChannelCid = null;
+      }
+      document.getElementById('voice-connected-bar').classList.remove('active');
+      Object.values(voicePeers).forEach(pc => pc.close());
+      voicePeers = {};
+      stopLocalStreamIfIdle();
+    }
+
+    socket.on('voice_state_updated', (st) => {
+      voiceState = st || {};
+      if (modeView === 'server' && activeServerCode) renderServerSidebar(activeServerCode);
+    });
+
+    socket.on('voice_peer_joined', async ({ cid, peer_uid }) => {
+      if (activeVoiceChannelCid !== cid) return;
+      const pc = createMeshPeer(peer_uid, (sig) => socket.emit('voice_webrtc_signal', { cid, to_uid: peer_uid, signal: sig }));
+      voicePeers[peer_uid] = pc;
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit('voice_webrtc_signal', { cid, to_uid: peer_uid, signal: { type: 'offer', sdp: offer } });
+    });
+
+    socket.on('voice_webrtc_signal', async ({ cid, from_uid, signal }) => {
+      if (activeVoiceChannelCid !== cid) return;
+      let pc = voicePeers[from_uid];
+      if (!pc) {
+        pc = createMeshPeer(from_uid, (sig) => socket.emit('voice_webrtc_signal', { cid, to_uid: from_uid, signal: sig }));
+        voicePeers[from_uid] = pc;
+      }
+      await handlePeerSignal(pc, signal, (ans) => socket.emit('voice_webrtc_signal', { cid, to_uid: from_uid, signal: { type: 'answer', sdp: ans } }));
+    });
+
+    socket.on('voice_peer_left', ({ peer_uid }) => {
+      if (voicePeers[peer_uid]) { voicePeers[peer_uid].close(); delete voicePeers[peer_uid]; }
+      removeRemoteStream(peer_uid);
+    });
+
+    function createMeshPeer(peerUid, sendSig) {
+      const pc = new RTCPeerConnection(rtcConfig);
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      pc.onicecandidate = (e) => {
+        if (e.candidate) sendSig({ type: 'ice', candidate: e.candidate });
+      };
+      pc.ontrack = (e) => attachRemoteStream(peerUid, e.streams[0]);
+      return pc;
+    }
+
+    async function handlePeerSignal(pc, signal, sendAnswer) {
+      if (signal.type === 'offer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+        const ans = await pc.createAnswer();
+        await pc.setLocalDescription(ans);
+        sendAnswer(ans);
+      } else if (signal.type === 'answer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+      } else if (signal.type === 'ice' && signal.candidate) {
+        await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+      }
+    }
+
+    function toggleCallMic() {
+      if (!localStream) return;
+      localStream.getAudioTracks().forEach(t => { t.enabled = !t.enabled; });
+    }
+
+    function toggleVoiceMute() {
+      if (!localStream) return;
+      let mutedNow = false;
+      localStream.getAudioTracks().forEach(t => { t.enabled = !t.enabled; mutedNow = !t.enabled; });
+      if (activeVoiceChannelCid) {
+        socket.emit('voice_toggle_state', { cid: activeVoiceChannelCid, uid: me.uid, muted: mutedNow });
+      }
+    }
+
+    async function toggleCallCam() {
+      const stream = await ensureLocalStream(true);
+      stream.getVideoTracks().forEach(t => { t.enabled = !t.enabled; });
+    }
+
+    function hangupCurrentCall() {
+      if (activeDmCallUid) {
+        socket.emit('end_call', { to_uid: activeDmCallUid });
+        if (dmPeer) { dmPeer.close(); dmPeer = null; }
+        activeDmCallUid = null;
+      }
+      if (activeGroupCallGid) {
+        socket.emit('leave_group_call', { gid: activeGroupCallGid, uid: me.uid });
+        Object.values(groupPeers).forEach(pc => pc.close());
+        groupPeers = {};
+        activeGroupCallGid = null;
+      }
+      hideCallStage();
+      stopLocalStreamIfIdle();
+    }
+
+    function stopLocalStreamIfIdle() {
+      if (!activeDmCallUid && !activeGroupCallGid && !activeVoiceChannelCid && localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+      }
+    }
+
+    socket.on('call_ended', () => {
+      if (dmPeer) { dmPeer.close(); dmPeer = null; }
+      activeDmCallUid = null;
+      hideCallStage();
+      stopLocalStreamIfIdle();
+    });
+  </script>
+</body>
+</html>
